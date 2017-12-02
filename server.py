@@ -9,6 +9,7 @@ import string
 from twisted.internet import reactor, defer
 from twisted.names import client, dns, error, server
 
+
 class DynamicResolver(client.Resolver):
     """
     A resolver which implements xip.io style IP resolution based on name.
@@ -17,9 +18,7 @@ class DynamicResolver(client.Resolver):
 
     """
 
-
-    def __init__(self, servers, wildcard_domain, mapped_hosts=None,
-            debug_level=0):
+    def __init__(self, servers, wildcard_domain, mapped_hosts=None, debug_level=0):
 
         client.Resolver.__init__(self, servers=servers)
 
@@ -32,7 +31,7 @@ class DynamicResolver(client.Resolver):
         # wilcard domain.
 
         pattern = (r'.*\.(?P<ipaddr>\d+\.\d+\.\d+\.\d+)\.%s' %
-                re.escape(wildcard_domain))
+                   re.escape(wildcard_domain))
 
         if self._debug_level > 0:
             print('wildcard %s' % pattern, file=sys.stderr)
@@ -125,7 +124,7 @@ class DynamicResolver(client.Resolver):
 
                 return client.Resolver.lookupAddress(self, result, timeout)
 
-            payload=dns.Record_A(address=bytes(result))
+            payload = dns.Record_A(address=bytes(result))
             answer = dns.RRHeader(name=name, payload=payload)
 
             answers = [answer]
@@ -139,6 +138,7 @@ class DynamicResolver(client.Resolver):
                 print('fallback %s' % name, file=sys.stderr)
 
             return client.Resolver.lookupAddress(self, name, timeout)
+
 
 def main():
     name_servers = os.environ.get('NAME_SERVERS', '8.8.8.8,8.8.4.4')
@@ -166,10 +166,9 @@ def main():
 
     factory = server.DNSServerFactory(
         clients=[DynamicResolver(servers=server_list,
-            wildcard_domain=wildcard_domain,
-            mapped_hosts=mapped_hosts,
-            debug_level=debug_level)]
-    )
+                                 wildcard_domain=wildcard_domain,
+                                 mapped_hosts=mapped_hosts,
+                                 debug_level=debug_level)])
 
     protocol = dns.DNSDatagramProtocol(controller=factory)
 
@@ -177,6 +176,7 @@ def main():
     reactor.listenTCP(10053, factory)
 
     reactor.run()
+
 
 if __name__ == '__main__':
     raise SystemExit(main())
