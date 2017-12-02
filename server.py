@@ -135,9 +135,14 @@ class DynamicResolver(client.Resolver):
 
         else:
             if self._debug_level > 2:
-                print('fallback %s' % name, file=sys.stderr)
+                print('Unknown %s' % name, file=sys.stderr)
 
-            return client.Resolver.lookupAddress(self, name, timeout)
+            answer = dns.RRHeader(name=name)
+            answers = [answer]
+            authority = []
+            additional = []
+
+            return defer.succeed((answers, authority, additional))
 
 
 def main():
@@ -162,7 +167,7 @@ def main():
         with open(mapping_json) as fp:
             mapped_hosts = json.load(fp)
 
-    debug_level = int(os.environ.get('DEBUG_LEVEL', '0'))
+    debug_level = int(os.environ.get('DEBUG_LEVEL', '9'))
 
     factory = server.DNSServerFactory(
         clients=[DynamicResolver(servers=server_list,
