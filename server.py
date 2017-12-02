@@ -9,6 +9,7 @@ import string
 from twisted.internet import reactor, defer
 from twisted.names import client, dns, error, server
 
+TTL = 60*60*60
 
 class DynamicResolver(client.Resolver):
     """
@@ -18,11 +19,15 @@ class DynamicResolver(client.Resolver):
 
     """
 
-    def __init__(self, servers, wildcard_domain, mapped_hosts=None, debug_level=0):
+    def __init__(self, servers, wildcard_domain, mapped_hosts=None, debug_level=0,
+                 ns_domain=None, my_ip=None):
 
         client.Resolver.__init__(self, servers=servers)
 
         self._debug_level = debug_level
+        self.ns_domain = ns_domain
+        self.wildcard_domain = wildcard_domain
+        self.my_ip = bytes(my_ip)
 
         if self._debug_level > 0:
             print('nameservers %s' % servers, file=sys.stderr)
@@ -97,6 +102,27 @@ class DynamicResolver(client.Resolver):
 
             return result
 
+    def lookupNameservers(self, name, timeout=None):
+        """ Answer NS record requests """
+        if name.endswith('.' + self.wildcard_domain):
+            payload = dns.Record_NS(name=self.ns_domain)
+            answer = dns.RRHeader(name=name, type=dns.NS,
+                                  payload=payload, auth=True, ttl=TTL)
+
+            # Additional section: NS ip address
+            additional_payload = dns.Record_A(address=self.my_ip)
+            additional_answer = dns.RRHeader(name=name,
+                                             payload=additional_payload, ttl=TTL)
+
+            answers = [answer]
+            authority = []
+            additional = [additional_answer]
+
+            return defer.succeed((answers, authority, additional))
+
+        # empty response for domains that are not handled by our server
+        return defer.succeed(([], [], []))
+
     def lookupAddress(self, name, timeout=None):
         if self._debug_level > 2:
             print('address %s' % name, file=sys.stderr)
@@ -126,7 +152,7 @@ class DynamicResolver(client.Resolver):
 
             # TTL = 1 hour
             payload = dns.Record_A(address=bytes(result))
-            answer = dns.RRHeader(name=name, payload=payload, auth=True, ttl=60*60*60)
+            answer = dns.RRHeader(name=name, payload=payload, auth=True, ttl=TTL)
 
             answers = [answer]
             authority = []
@@ -158,6 +184,8 @@ def main():
             server_list.append((parts[0], 53))
 
     wildcard_domain = os.environ.get('WILDCARD_DOMAIN', 'xip.io')
+    ns_domain = os.environ.get('NS_DOMAIN', 'ns-1.xip.io')
+    my_ip = os.environ.get('MY_IP', '127.0.0.1')
 
     mapped_hosts = {}
 
@@ -173,7 +201,9 @@ def main():
         clients=[DynamicResolver(servers=server_list,
                                  wildcard_domain=wildcard_domain,
                                  mapped_hosts=mapped_hosts,
-                                 debug_level=debug_level)])
+                                 debug_level=debug_level,
+                                 ns_domain=ns_domain,
+                                 my_ip=my_ip)])
 
     protocol = dns.DNSDatagramProtocol(controller=factory)
 
