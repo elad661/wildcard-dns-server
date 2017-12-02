@@ -195,7 +195,7 @@ def main():
         with open(mapping_json) as fp:
             mapped_hosts = json.load(fp)
 
-    debug_level = int(os.environ.get('DEBUG_LEVEL', '9'))
+    debug_level = int(os.environ.get('DEBUG_LEVEL', '0'))
 
     factory = server.DNSServerFactory(
         clients=[DynamicResolver(servers=server_list,
