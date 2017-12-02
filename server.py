@@ -124,8 +124,9 @@ class DynamicResolver(client.Resolver):
 
                 return client.Resolver.lookupAddress(self, result, timeout)
 
+            # TTL = 1 hour
             payload = dns.Record_A(address=bytes(result))
-            answer = dns.RRHeader(name=name, payload=payload)
+            answer = dns.RRHeader(name=name, payload=payload, auth=True, ttl=60*60*60)
 
             answers = [answer]
             authority = []
@@ -137,8 +138,7 @@ class DynamicResolver(client.Resolver):
             if self._debug_level > 2:
                 print('Unknown %s' % name, file=sys.stderr)
 
-            answer = dns.RRHeader(name=name)
-            answers = [answer]
+            answers = []
             authority = []
             additional = []
 
