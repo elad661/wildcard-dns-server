@@ -42,7 +42,7 @@ class DynamicResolver(authority.FileAuthority):
         # Create regex pattern corresponding to xip.io style DNS
         # wilcard domain.
 
-        pattern = (r'.*\.(?P<ipaddr>\d+\.\d+\.\d+\.\d+)\.%s' %
+        pattern = (r'(.*\.)?(?P<ipaddr>\d+\.\d+\.\d+\.\d+)\.%s' %
                    re.escape(wildcard_domain))
 
         if self._debug_level > 0:
