@@ -186,6 +186,7 @@ def main():
     wildcard_domain = os.environ.get('WILDCARD_DOMAIN', 'xip.io')
     ns_domain = os.environ.get('NS_DOMAIN', 'ns-1.xip.io')
     my_ip = os.environ.get('MY_IP', '127.0.0.1')
+    port = int(os.environ.get('DNS_PORT', '10053'))
 
     mapped_hosts = {}
 
@@ -207,8 +208,8 @@ def main():
 
     protocol = dns.DNSDatagramProtocol(controller=factory)
 
-    reactor.listenUDP(10053, protocol)
-    reactor.listenTCP(10053, factory)
+    reactor.listenUDP(port, protocol)
+    reactor.listenTCP(port, factory)
 
     reactor.run()
 
