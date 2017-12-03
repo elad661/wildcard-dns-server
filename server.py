@@ -7,11 +7,13 @@ import json
 import string
 
 from twisted.internet import reactor, defer
-from twisted.names import client, dns, error, server
+from twisted.python import failure
+from twisted.names import client, common, authority, dns, error, server
 
 TTL = 60*60*60
 
-class DynamicResolver(client.Resolver):
+
+class DynamicResolver(authority.FileAuthority):
     """
     A resolver which implements xip.io style IP resolution based on name.
     as well as more conventional glob style DNS wildcard mapping. If no
@@ -19,18 +21,23 @@ class DynamicResolver(client.Resolver):
 
     """
 
-    def __init__(self, servers, wildcard_domain, mapped_hosts=None, debug_level=0,
-                 ns_domain=None, my_ip=None):
+    def __init__(self, wildcard_domain, debug_level=0, ns_domain=None, my_ip=None):
 
-        client.Resolver.__init__(self, servers=servers)
+        common.ResolverBase.__init__(self)
+        self._cache = {}
 
         self._debug_level = debug_level
         self.ns_domain = ns_domain
         self.wildcard_domain = wildcard_domain
         self.my_ip = bytes(my_ip)
 
-        if self._debug_level > 0:
-            print('nameservers %s' % servers, file=sys.stderr)
+        self.soa = dns.Record_SOA(mname=self.wildcard_domain,
+                                  rname=self.wildcard_domain,
+                                  serial=0,
+                                  refresh=TTL,
+                                  minimum=TTL,
+                                  expire=TTL * 24,
+                                  ttl=TTL)
 
         # Create regex pattern corresponding to xip.io style DNS
         # wilcard domain.
@@ -42,65 +49,6 @@ class DynamicResolver(client.Resolver):
             print('wildcard %s' % pattern, file=sys.stderr)
 
         self._wildcard = re.compile(pattern)
-
-        # Create regex pattern corresponding to conventional glob
-        # style DNS wildcard mapping.
-
-        self._mapping = None
-
-        count = 1
-        patterns = []
-        results = {}
-
-        if mapped_hosts:
-            for inbound, outbound in mapped_hosts.items():
-                label = 'RULE%s' % count
-                inbound = re.escape(inbound).replace('\\*', '.*') 
-                patterns.append('(?P<%s>%s)' % (label, inbound))
-                results[label] = outbound
-                count += 1
-
-            pattern = '|'.join(patterns)
-
-            if self._debug_level > 0:
-                print('mapping %s' % pattern, file=sys.stderr)
-                print('results %s' % results, file=sys.stderr)
-
-            self._mapping = re.compile(pattern)
-            self._mapping_results = results
-
-    def _localLookup(self, name):
-        if self._debug_level > 2:
-            print('lookup %s' % name, file=sys.stderr)
-
-        # First try and map xip.io style DNS wildcard.
-
-        match = self._wildcard.match(name)
-
-        if match:
-            ipaddr = match.group('ipaddr')
-
-            if self._debug_level > 1:
-                print('wildcard %s --> %s' % (name, ipaddr), file=sys.stderr)
-
-            return ipaddr
-
-        # Next try and map conventional glob style wildcard mapping.
-
-        if self._mapping is None:
-            return
-
-        match = self._mapping.match(name)
-
-        if match:
-            label = [k for k, v in match.groupdict().items() if v].pop()
-
-            result = self._mapping_results[label]
-
-            if self._debug_level > 1:
-                print('mapping %s --> %s' % (name, result), file=sys.stderr)
-
-            return result
 
     def lookupNameservers(self, name, timeout=None):
         """ Answer NS record requests """
@@ -120,91 +68,68 @@ class DynamicResolver(client.Resolver):
 
             return defer.succeed((answers, authority, additional))
 
-        # empty response for domains that are not handled by our server
-        return defer.succeed(([], [], []))
+        # fail for domains that are not handled by our server
+        return defer.fail(failure.Failure(dns.AuthoritativeDomainError(name)))
 
-    def lookupAddress(self, name, timeout=None):
+    def _localLookup(self, name):
         if self._debug_level > 2:
-            print('address %s' % name, file=sys.stderr)
+            print('lookup %s' % name, file=sys.stderr)
 
-        result = self._localLookup(name)
+        # First try and map xip.io style DNS wildcard.
 
-        # If doesn't look like an IP address, try and look it up again
-        # locally. Do this as many times as need to. Note there is no
-        # protection against loops here.
+        match = self._wildcard.match(name)
 
-        while result and result[0] not in string.digits:
-            mapped = self._localLookup(result)
-            if mapped is not None:
-                result = mapped
-            else:
-                break
+        if match:
+            ipaddr = match.group('ipaddr')
 
-        if result:
-            # Check if looks like IP address. If still not treat it like
-            # a CNAME and lookup name using normal DNS lookup.
+            if self._debug_level > 1:
+                print('wildcard %s --> %s' % (name, ipaddr), file=sys.stderr)
 
-            if result[0] not in string.digits:
-                if self._debug_level > 1:
-                    print('cname %s' % result, file=sys.stderr)
+            return ipaddr
 
-                return client.Resolver.lookupAddress(self, result, timeout)
+    def _lookup(self, name, cls, type, timeout=None):
+        if self._debug_level > 2:
+            print('address %s (%s)' % (name, cls), file=sys.stderr)
 
-            # TTL = 1 hour
-            payload = dns.Record_A(address=bytes(result))
-            answer = dns.RRHeader(name=name, payload=payload, auth=True, ttl=TTL)
+        answers = []
+        additional = []
+        authority = []
 
-            answers = [answer]
-            authority = []
-            additional = []
-
-            return defer.succeed((answers, authority, additional))
-
+        if cls == dns.NS:
+            return self.lookupNameservers(name)
+        elif cls == dns.SOA:
+            answer = dns.RRHeader(name=name, payload=self.soa, auth=True, ttl=TTL)
+            return defer.succeed(([answer], authority, additional))
         else:
-            if self._debug_level > 2:
-                print('Unknown %s' % name, file=sys.stderr)
+            result = self._localLookup(name)
+            if result:
+                # TTL = 1 hour
+                payload = dns.Record_A(address=bytes(result))
+                answer = dns.RRHeader(name=name, payload=payload, auth=True, ttl=TTL)
 
-            answers = []
-            authority = []
-            additional = []
+                answers = [answer]
 
-            return defer.succeed((answers, authority, additional))
+                return defer.succeed((answers, authority, additional))
+
+            else:
+                if self._debug_level > 2:
+                    print('Unknown %s' % name, file=sys.stderr)
+                return defer.fail(failure.Failure(dns.AuthoritativeDomainError(name)))
 
 
 def main():
-    name_servers = os.environ.get('NAME_SERVERS', '8.8.8.8,8.8.4.4')
-
-    server_list = []
-
-    for address in name_servers.split(','):
-        parts = address.strip().split(':')
-        if len(parts) > 1:
-            server_list.append((parts[0], int(parts[1])))
-        elif parts:
-            server_list.append((parts[0], 53))
-
     wildcard_domain = os.environ.get('WILDCARD_DOMAIN', 'xip.io')
     ns_domain = os.environ.get('NS_DOMAIN', 'ns-1.xip.io')
     my_ip = os.environ.get('MY_IP', '127.0.0.1')
     port = int(os.environ.get('DNS_PORT', '10053'))
 
-    mapped_hosts = {}
-
-    mapping_json = os.environ.get('MAPPED_HOSTS')
-
-    if mapping_json and os.path.exists(mapping_json):
-        with open(mapping_json) as fp:
-            mapped_hosts = json.load(fp)
-
     debug_level = int(os.environ.get('DEBUG_LEVEL', '0'))
 
     factory = server.DNSServerFactory(
-        clients=[DynamicResolver(servers=server_list,
-                                 wildcard_domain=wildcard_domain,
-                                 mapped_hosts=mapped_hosts,
-                                 debug_level=debug_level,
-                                 ns_domain=ns_domain,
-                                 my_ip=my_ip)])
+        authorities=[DynamicResolver(wildcard_domain=wildcard_domain,
+                                     debug_level=debug_level,
+                                     ns_domain=ns_domain,
+                                     my_ip=my_ip)])
 
     protocol = dns.DNSDatagramProtocol(controller=factory)
 
