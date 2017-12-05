@@ -19,7 +19,10 @@ You can edit the configuration parameters in server.py or use environment variab
 
 ## configuration envrionment variables
 `WILDCARD_DOMAIN` - the wildcard domain root, eg. nip.local
+
 `NS_DOMAIN` - the DNS name pointing to the machine running the server
+
 `MY_IP` - the IP address of the machine running the server
+
 `DNS_PORT` - port to listen on. Defaults to 10053 for development (set to 53 for real usage)
 `DEBUG_LEVEL` - enable debug output if set to more than 0. more verbose as the number goes up.
