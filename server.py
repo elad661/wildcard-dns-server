@@ -52,7 +52,7 @@ class DynamicResolver(authority.FileAuthority):
 
     def lookupNameservers(self, name, timeout=None):
         """ Answer NS record requests """
-        if name.endswith('.' + self.wildcard_domain):
+        if name.endswith('.' + self.wildcard_domain) or name == self.wildcard_domain:
             payload = dns.Record_NS(name=self.ns_domain)
             answer = dns.RRHeader(name=name, type=dns.NS,
                                   payload=payload, auth=True, ttl=TTL)
@@ -89,16 +89,17 @@ class DynamicResolver(authority.FileAuthority):
 
     def _lookup(self, name, cls, type, timeout=None):
         if self._debug_level > 2:
-            print('address %s (%s)' % (name, cls), file=sys.stderr)
+            print('address %s (%s)' % (name, type), file=sys.stderr)
 
         answers = []
         additional = []
         authority = []
 
-        if cls == dns.NS:
+        if type == dns.NS:
             return self.lookupNameservers(name)
-        elif cls == dns.SOA:
-            answer = dns.RRHeader(name=name, payload=self.soa, auth=True, ttl=TTL)
+        elif type == dns.SOA:
+            answer = dns.RRHeader(name=name, type=dns.SOA,
+                                  payload=self.soa, auth=True, ttl=TTL)
             return defer.succeed(([answer], authority, additional))
         else:
             result = self._localLookup(name)
