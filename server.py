@@ -52,7 +52,9 @@ class DynamicResolver(authority.FileAuthority):
 
     def lookupNameservers(self, name, timeout=None):
         """ Answer NS record requests """
-        if name.endswith('.' + self.wildcard_domain) or name == self.wildcard_domain:
+        name_is_self = name in [self.wildcard_domain, self.ns_domain]
+        if name.endswith('.' + self.wildcard_domain) or name_is_self:
+            # If we're responsible for this domain, return NS records
             payload = dns.Record_NS(name=self.ns_domain)
             answer = dns.RRHeader(name=name, type=dns.NS,
                                   payload=payload, auth=True, ttl=TTL)
@@ -75,7 +77,11 @@ class DynamicResolver(authority.FileAuthority):
         if self._debug_level > 2:
             print('lookup %s' % name, file=sys.stderr)
 
-        # First try and map xip.io style DNS wildcard.
+        # return own IP if the request is for our NS domain
+        if name == self.ns_domain:
+            return self.my_ip
+
+        # try and map xip.io style DNS wildcard.
 
         match = self._wildcard.match(name)
 
@@ -86,6 +92,12 @@ class DynamicResolver(authority.FileAuthority):
                 print('wildcard %s --> %s' % (name, ipaddr), file=sys.stderr)
 
             return ipaddr
+
+    def _get_authority_record(self, name):
+        return dns.RRHeader(name=name,
+                            type=dns.SOA,
+                            payload=self.soa,
+                            auth=True, ttl=TTL)
 
     def _lookup(self, name, cls, type, timeout=None):
         if self._debug_level > 2:
@@ -98,10 +110,9 @@ class DynamicResolver(authority.FileAuthority):
         if type == dns.NS:
             return self.lookupNameservers(name)
         elif type == dns.SOA:
-            answer = dns.RRHeader(name=name, type=dns.SOA,
-                                  payload=self.soa, auth=True, ttl=TTL)
+            answer = [self._get_authority_record(name)]
             return defer.succeed(([answer], authority, additional))
-        else:
+        elif type == dns.A:
             result = self._localLookup(name)
             if result:
                 # TTL = 1 hour
@@ -116,6 +127,10 @@ class DynamicResolver(authority.FileAuthority):
                 if self._debug_level > 2:
                     print('Unknown %s' % name, file=sys.stderr)
                 return defer.fail(failure.Failure(dns.AuthoritativeDomainError(name)))
+        else:
+            # Types not handled by our server - respond with SOA
+            authority = [self._get_authority_record(name)]
+            return defer.succeed((answers, authority, additional))
 
 
 def main():
